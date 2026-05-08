@@ -31,6 +31,8 @@ export type ProjectSidebarContext = {
   workspacesEnabled: (project: LocalProject) => boolean
   workspaceIds: (project: LocalProject) => string[]
   workspaceLabel: (directory: string, branch?: string, projectId?: string) => string
+  navigateToTeamSetup: (directory: string) => void
+  navigateToAdo: (directory: string) => void
   sessionProps: Omit<SessionItemProps, "session" | "list" | "slug" | "mobile" | "dense">
 }
 
@@ -67,6 +69,8 @@ const ProjectTile = (props: {
   toggleProjectWorkspaces: (project: LocalProject) => void
   workspacesEnabled: (project: LocalProject) => boolean
   closeProject: (directory: string) => void
+  navigateToTeamSetup: (directory: string) => void
+  navigateToAdo: (directory: string) => void
   setMenu: (value: boolean) => void
   setOpen: (value: boolean) => void
   setSuppressHover: (value: boolean) => void
@@ -149,6 +153,12 @@ const ProjectTile = (props: {
         <ContextMenu.Content>
           <ContextMenu.Item onSelect={() => props.showEditProjectDialog(props.project)}>
             <ContextMenu.ItemLabel>{props.language.t("common.edit")}</ContextMenu.ItemLabel>
+          </ContextMenu.Item>
+          <ContextMenu.Item onSelect={() => props.navigateToTeamSetup(props.project.worktree)}>
+            <ContextMenu.ItemLabel>Configure Team</ContextMenu.ItemLabel>
+          </ContextMenu.Item>
+          <ContextMenu.Item onSelect={() => props.navigateToAdo(props.project.worktree)}>
+            <ContextMenu.ItemLabel>Azure DevOps</ContextMenu.ItemLabel>
           </ContextMenu.Item>
           <ContextMenu.Item
             data-action="project-workspaces-toggle"
@@ -324,6 +334,8 @@ export const SortableProject = (props: {
       toggleProjectWorkspaces={props.ctx.toggleProjectWorkspaces}
       workspacesEnabled={props.ctx.workspacesEnabled}
       closeProject={props.ctx.closeProject}
+      navigateToTeamSetup={props.ctx.navigateToTeamSetup}
+      navigateToAdo={props.ctx.navigateToAdo}
       setMenu={(value) => setState("menu", value)}
       setOpen={(value) => props.ctx.onHoverOpenChanged(props.project.worktree, value)}
       setSuppressHover={(value) => setState("suppressHover", value)}

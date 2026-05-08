@@ -15,14 +15,38 @@ import {
   useCommand,
 } from "@opencode-ai/app"
 import type { AsyncStorage } from "@solid-primitives/storage"
-import { MemoryRouter } from "@solidjs/router"
-import { createEffect, createResource, onCleanup, onMount, Show } from "solid-js"
+import { MemoryRouter, Router } from "@solidjs/router"
+import { createEffect, createResource, onCleanup, onMount, Show, type Component } from "solid-js"
 import { render } from "solid-js/web"
 import pkg from "../../package.json"
 import { initI18n, t } from "./i18n"
 import { webviewZoom } from "./webview-zoom"
 import "./styles.css"
 import { useTheme } from "@opencode-ai/ui/theme"
+
+// Same-origin iframes (e.g. embedded session view in pipeline panel) don't have
+// the preload-injected `window.api`. Inherit from the parent window so the app
+// renderer can talk to the Electron main process.
+if (typeof window !== "undefined" && !(window as unknown as { api?: unknown }).api) {
+  try {
+    if (window.parent && window.parent !== window) {
+      const parentApi = (window.parent as unknown as { api?: typeof window.api }).api
+      if (parentApi) (window as unknown as { api?: typeof window.api }).api = parentApi
+    }
+  } catch {
+    // cross-origin parent; ignore
+  }
+}
+
+// In embedded iframe mode (pipeline side panel), use the browser Router so the
+// iframe's actual URL drives routing instead of MemoryRouter's in-memory stack.
+const isEmbeddedIframe = (() => {
+  if (typeof window === "undefined") return false
+  if (window.parent === window) return false
+  return new URLSearchParams(window.location.search).get("embedded") === "1"
+})()
+
+const RouterComponent: Component<Parameters<typeof MemoryRouter>[0]> = isEmbeddedIframe ? Router : MemoryRouter
 
 const root = document.getElementById("root")
 if (import.meta.env.DEV && !(root instanceof HTMLElement)) {
@@ -246,7 +270,7 @@ const createPlatform = (): Platform => {
 }
 
 let menuTrigger = null as null | ((id: string) => void)
-window.api.onMenuCommand((id) => {
+window.api?.onMenuCommand?.((id) => {
   menuTrigger?.(id)
 })
 listenForDeepLinks()
@@ -344,7 +368,7 @@ render(() => {
               <AppInterface
                 defaultServer={defaultServer.latest ?? ServerConnection.Key.make("sidecar")}
                 servers={servers()}
-                router={MemoryRouter}
+                router={RouterComponent}
               >
                 <Inner />
               </AppInterface>

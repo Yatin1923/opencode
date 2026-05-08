@@ -60,7 +60,7 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useTheme, type ColorScheme } from "@opencode-ai/ui/theme/context"
 import { useCommand, type CommandOption } from "@/context/command"
 import { ConstrainDragXAxis, getDraggableId } from "@/utils/solid-dnd"
-import { DebugBar } from "@/components/debug-bar"
+// DebugBar removed per product decision (FPS/jank/CLS overlay no longer rendered)
 import { Titlebar } from "@/components/titlebar"
 import { useServer } from "@/context/server"
 import { useLanguage, type Locale } from "@/context/language"
@@ -128,6 +128,11 @@ export default function Layout(props: ParentProps) {
   const language = useLanguage()
   const initialDirectory = decode64(params.dir)
   const location = useLocation()
+  const embedded = createMemo(() => {
+    const q = location.search
+    if (!q) return false
+    return /(?:^|[?&])embedded=1(?:&|$)/.test(q.startsWith("?") ? q.slice(1) : q)
+  })
   const route = createMemo(() => {
     const slug = params.dir
     if (!slug) return { slug, dir: "" }
@@ -2005,6 +2010,20 @@ export default function Layout(props: ParentProps) {
       setState("hoverProject", hoverOpen ? worktree : undefined)
     },
     navigateToProject,
+    navigateToTeamSetup: (directory: string) => {
+      const run = ++dialogRun
+      void import("@/components/dialog-team-setup").then((x) => {
+        if (dialogDead || dialogRun !== run) return
+        dialog.show(() => <x.DialogTeamSetup directory={directory} />)
+      })
+    },
+    navigateToAdo: (directory: string) => {
+      const run = ++dialogRun
+      void import("@/components/dialog-ado").then((x) => {
+        if (dialogDead || dialogRun !== run) return
+        dialog.show(() => <x.DialogAdo dir={directory} />)
+      })
+    },
     openSidebar: () => layout.sidebar.open(),
     closeProject,
     showEditProjectDialog,
@@ -2211,20 +2230,49 @@ export default function Layout(props: ParentProps) {
                   when={workspacesEnabled()}
                   fallback={
                     <>
-                      <div class="shrink-0 py-4">
+                       <div class="shrink-0 py-4 flex flex-col gap-2">
                         <Button
                           size="large"
-                          icon="new-session"
                           class="w-full"
-                          onClick={() => {
-                            const dir = worktree()
-                            if (!dir) return
-                            navigateWithSidebarReset(`/${base64Encode(dir)}/session`)
-                          }}
+                          onClick={() => navigate(`/${params.dir}/dashboard`)}
+                          aria-label="Dashboard"
                         >
-                          {language.t("command.session.new")}
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0">
+                            <rect x="3" y="3" width="7" height="9" />
+                            <rect x="14" y="3" width="7" height="5" />
+                            <rect x="14" y="12" width="7" height="9" />
+                            <rect x="3" y="16" width="7" height="5" />
+                          </svg>
+                          Dashboard
                         </Button>
-                      </div>
+                        <div class="flex gap-2">
+                          <Button
+                            size="large"
+                            icon="new-session"
+                            class="flex-1"
+                            onClick={() => {
+                              const dir = worktree()
+                              if (!dir) return
+                              navigateWithSidebarReset(`/${base64Encode(dir)}/session`)
+                            }}
+                          >
+                            {language.t("command.session.new")}
+                          </Button>
+                          <Button
+                            size="large"
+                            icon="new-session"
+                            class="flex-1"
+                            onClick={() => {
+                              const dir = worktree()
+                              if (!dir) return
+                              navigateWithSidebarReset(`/${base64Encode(dir)}/board`)
+                            }}
+                            aria-label="Azure Board"
+                          >
+                            Azure Board
+                          </Button>
+                        </div>
+                       </div>
                       <div class="flex-1 min-h-0">
                         <LocalWorkspace
                           ctx={workspaceSidebarCtx}
@@ -2360,10 +2408,25 @@ export default function Layout(props: ParentProps) {
   return (
     <div class="relative bg-background-base flex-1 min-h-0 min-w-0 flex flex-col select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text">
       {autoselecting() ?? ""}
-      <Titlebar />
+      <Show when={embedded()}>
+        <style>{`
+          [data-session-title],
+          [data-component="delegation-flow-panel"],
+          [data-component="session-mobile-tabs"],
+          [data-component="prompt-agent-control"],
+          [data-component="prompt-model-control"],
+          [data-component="prompt-variant-control"] {
+            display: none !important;
+          }
+        `}</style>
+      </Show>
+      <Show when={!embedded()}>
+        <Titlebar />
+      </Show>
       <div class="flex-1 min-h-0 min-w-0 flex">
         <div class="flex-1 min-h-0 relative">
           <div class="size-full relative overflow-x-hidden">
+            <Show when={!embedded()}>
             <nav
               aria-label={language.t("sidebar.nav.projectsAndSessions")}
               data-component="sidebar-nav-desktop"
@@ -2439,6 +2502,7 @@ export default function Layout(props: ParentProps) {
                 {sidebarContent(true)}
               </nav>
             </div>
+            </Show>
 
             <div
               classList={{
@@ -2449,7 +2513,7 @@ export default function Layout(props: ParentProps) {
                   !state.sizing,
               }}
               style={{
-                "--main-left": layout.sidebar.opened() ? `${side()}px` : "4rem",
+                "--main-left": embedded() ? "0px" : layout.sidebar.opened() ? `${side()}px` : "4rem",
               }}
             >
               <main
@@ -2502,7 +2566,7 @@ export default function Layout(props: ParentProps) {
             </div>
           </div>
         </div>
-        {import.meta.env.DEV && <DebugBar />}
+        {/* DebugBar disabled per product decision */}
       </div>
       <Toast.Region />
     </div>

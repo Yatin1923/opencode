@@ -5,7 +5,6 @@ import { FileComponentProvider } from "@opencode-ai/ui/context/file"
 import { MarkedProvider } from "@opencode-ai/ui/context/marked"
 import { File } from "@opencode-ai/ui/file"
 import { Font } from "@opencode-ai/ui/font"
-import { Splash } from "@opencode-ai/ui/logo"
 import { ThemeProvider } from "@opencode-ai/ui/theme/context"
 import { MetaProvider } from "@solidjs/meta"
 import { type BaseRouterProps, Navigate, Route, Router } from "@solidjs/router"
@@ -47,6 +46,9 @@ import { ErrorPage } from "./pages/error"
 import { useCheckServerHealth } from "./utils/server-health"
 
 const HomeRoute = lazy(() => import("@/pages/home"))
+import BoardPage from "@/pages/board"
+import DashboardPage from "@/pages/dashboard"
+import { Splash } from "@opencode-ai/ui/logo"
 const loadSession = () => import("@/pages/session")
 const Session = lazy(loadSession)
 const Loading = () => <div class="size-full" />
@@ -162,6 +164,21 @@ export function AppBaseProviders(props: ParentProps<{ locale?: Locale }>) {
   )
 }
 
+function SuspenseFallback() {
+  // The C-mark splash is reserved for true app startup (handled by the
+  // desktop loading window). All in-app Suspense transitions show a neutral
+  // teal spinner so the brand mark never flashes during navigation or data
+  // fetches.
+  return (
+    <div class="absolute inset-0 z-50 flex items-center justify-center bg-background-base pointer-events-none">
+      <div
+        class="w-7 h-7 rounded-full border-2 border-border-weak-base animate-spin"
+        style={{ "border-top-color": "#2A9D8F" }}
+      />
+    </div>
+  )
+}
+
 function ConnectionGate(props: ParentProps<{ disableHealthCheck?: boolean }>) {
   const server = useServer()
   const checkServerHealth = useCheckServerHealth()
@@ -190,21 +207,14 @@ function ConnectionGate(props: ParentProps<{ disableHealthCheck?: boolean }>) {
   )
 
   return (
-    <Suspense
-      fallback={
-        <div class="h-dvh w-screen flex flex-col items-center justify-center bg-background-base">
-          <Splash class="w-16 h-20 opacity-50 animate-pulse" />
-        </div>
-      }
-    >
-      {/*<Show
+      <Show
         when={checkMode() === "blocking" ? !startupHealthCheck.loading : startupHealthCheck.state !== "pending"}
         fallback={
           <div class="h-dvh w-screen flex flex-col items-center justify-center bg-background-base">
             <Splash class="w-16 h-20 opacity-50 animate-pulse" />
           </div>
         }
-      >*/}
+      >
       {checkMode() === "blocking" ? startupHealthCheck() : startupHealthCheck.latest}
       <Show
         when={startupHealthCheck()}
@@ -223,8 +233,7 @@ function ConnectionGate(props: ParentProps<{ disableHealthCheck?: boolean }>) {
       >
         {props.children}
       </Show>
-      {/*</Show>*/}
-    </Suspense>
+      </Show>
   )
 }
 
@@ -242,7 +251,10 @@ function ConnectionError(props: { onRetry?: () => void; onServerSelected?: (key:
   return (
     <div class="h-dvh w-screen flex flex-col items-center justify-center bg-background-base gap-6 p-6">
       <div class="flex flex-col items-center max-w-md text-center">
-        <Splash class="w-12 h-15 mb-4" />
+        <div
+          class="w-7 h-7 rounded-full border-2 border-border-weak-base animate-spin mb-4"
+          style={{ "border-top-color": "#2A9D8F" }}
+        />
         <p class="text-14-regular text-text-base">
           {unreachable()[0]}
           <span class="text-text-strong font-medium">{name()}</span>
@@ -310,6 +322,8 @@ export function AppInterface(props: {
                   <Route path="/:dir" component={DirectoryLayout}>
                     <Route path="/" component={SessionIndexRoute} />
                     <Route path="/session/:id?" component={SessionRoute} />
+                    <Route path="/board" component={BoardPage} />
+                    <Route path="/dashboard" component={DashboardPage} />
                   </Route>
                 </Dynamic>
               </GlobalSyncProvider>

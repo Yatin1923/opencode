@@ -332,8 +332,19 @@ export default function Page() {
   const prompt = usePrompt()
   const comments = useComments()
   const terminal = useTerminal()
-  const [searchParams, setSearchParams] = useSearchParams<{ prompt?: string }>()
+  const [searchParams, setSearchParams] = useSearchParams<{
+    prompt?: string
+    autosubmit?: string
+    agent?: string
+    embedded?: string
+  }>()
   const { params, sessionKey, tabs, view } = useSessionLayout()
+  const embedded = createMemo(() => searchParams.embedded === "1")
+  createEffect(() => {
+    if (typeof document === "undefined") return
+    if (embedded()) document.body.setAttribute("data-embedded", "1")
+    else document.body.removeAttribute("data-embedded")
+  })
 
   createEffect(() => {
     if (!prompt.ready()) return
@@ -341,8 +352,26 @@ export default function Page() {
       if (params.id) return
       const text = searchParams.prompt
       if (!text) return
+      const autosubmit = searchParams.autosubmit === "true"
+      const agentName = searchParams.agent
+
+      // Set the agent if specified
+      if (agentName) {
+        local.agent.set(agentName)
+      }
+
       prompt.set([{ type: "text", content: text, start: 0, end: text.length }], text.length)
-      setSearchParams({ ...searchParams, prompt: undefined })
+      setSearchParams({ ...searchParams, prompt: undefined, autosubmit: undefined, agent: undefined })
+
+      // Auto-submit by dispatching submit event on the prompt form
+      if (autosubmit) {
+        requestAnimationFrame(() => {
+          const form = document.querySelector("form[data-dock-surface='shell']") as HTMLFormElement | null
+          if (form) {
+            form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))
+          }
+        })
+      }
     })
   })
 
@@ -1794,10 +1823,27 @@ export default function Page() {
 
   return (
     <div class="relative bg-background-base size-full overflow-hidden flex flex-col">
+      <Show when={embedded()}>
+        <style>{`
+          body[data-embedded="1"] [data-component="sidebar-rail"],
+          body[data-embedded="1"] [data-component="sidebar-nav-desktop"],
+          body[data-embedded="1"] [data-component="sidebar-nav-mobile"],
+          body[data-embedded="1"] [data-component="session-header"],
+          body[data-embedded="1"] [data-component="session-side-panel"],
+          body[data-embedded="1"] [data-component="terminal-panel"],
+          body[data-embedded="1"] [data-component="session-mobile-tabs"] {
+            display: none !important;
+          }
+          body[data-embedded="1"] { padding: 0 !important; margin: 0 !important; }
+        `}</style>
+      </Show>
       {sessionSync() ?? ""}
-      <SessionHeader />
+      <div data-component="session-header" class="contents">
+        <SessionHeader />
+      </div>
       <div class="flex-1 min-h-0 flex flex-col md:flex-row">
         <Show when={!isDesktop() && !!params.id}>
+          <div data-component="session-mobile-tabs">
           <Tabs value={store.mobileTab} class="h-auto">
             <Tabs.List>
               <Tabs.Trigger
@@ -1820,6 +1866,7 @@ export default function Page() {
               </Tabs.Trigger>
             </Tabs.List>
           </Tabs>
+          </div>
         </Show>
 
         {/* Session panel */}
@@ -1833,7 +1880,7 @@ export default function Page() {
             width: sessionPanelWidth(),
           }}
         >
-          <div class="flex-1 min-h-0 overflow-hidden">
+          <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
             <Switch>
               <Match when={params.id}>
                 <Show when={messagesReady()}>
@@ -1951,22 +1998,26 @@ export default function Page() {
           </Show>
         </div>
 
-        <SessionSidePanel
-          canReview={canReview}
-          diffs={reviewDiffs}
-          diffsReady={reviewReady}
-          empty={reviewEmptyText}
-          hasReview={hasReview}
-          reviewCount={reviewCount}
-          reviewPanel={reviewPanel}
-          activeDiff={tree.activeDiff}
-          focusReviewDiff={focusReviewDiff}
-          reviewSnap={ui.reviewSnap}
-          size={size}
-        />
+        <div data-component="session-side-panel" class="contents">
+          <SessionSidePanel
+            canReview={canReview}
+            diffs={reviewDiffs}
+            diffsReady={reviewReady}
+            empty={reviewEmptyText}
+            hasReview={hasReview}
+            reviewCount={reviewCount}
+            reviewPanel={reviewPanel}
+            activeDiff={tree.activeDiff}
+            focusReviewDiff={focusReviewDiff}
+            reviewSnap={ui.reviewSnap}
+            size={size}
+          />
+        </div>
       </div>
 
-      <TerminalPanel />
+      <div data-component="terminal-panel" class="contents">
+        <TerminalPanel />
+      </div>
     </div>
   )
 }

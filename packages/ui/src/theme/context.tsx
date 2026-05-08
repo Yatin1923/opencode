@@ -2,7 +2,7 @@ import { createEffect, onMount } from "solid-js"
 import { createStore } from "solid-js/store"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { createSimpleContext } from "../context/helper"
-import oc2ThemeJson from "./themes/oc-2.json"
+import crewupThemeJson from "./themes/crewup.json"
 import { resolveThemeVariant, themeToCss } from "./resolve"
 import type { DesktopTheme } from "./types"
 
@@ -41,6 +41,7 @@ function knownThemes() {
 }
 
 const names: Record<string, string> = {
+  crewup: "Crewup",
   "oc-2": "OC-2",
   amoled: "AMOLED",
   aura: "Aura",
@@ -79,10 +80,10 @@ const names: Record<string, string> = {
   vesper: "Vesper",
   zenburn: "Zenburn",
 }
-const oc2Theme = oc2ThemeJson as DesktopTheme
+const crewupTheme = crewupThemeJson as DesktopTheme
 
 function normalize(id: string | null | undefined) {
-  return id === "oc-1" ? "oc-2" : id
+  return id === "oc-1" ? "crewup" : id === "oc-2" ? "crewup" : id
 }
 
 function read(key: string) {
@@ -133,7 +134,7 @@ function applyThemeCss(theme: DesktopTheme, themeId: string, mode: "light" | "da
   const tokens = resolveThemeVariant(variant, isDark)
   const css = themeToCss(tokens)
 
-  if (themeId !== "oc-2") {
+  if (themeId !== "crewup") {
     write(isDark ? STORAGE_KEYS.THEME_CSS_DARK : STORAGE_KEYS.THEME_CSS_LIGHT, css)
   }
 
@@ -150,7 +151,7 @@ function applyThemeCss(theme: DesktopTheme, themeId: string, mode: "light" | "da
 }
 
 function cacheThemeVariants(theme: DesktopTheme, themeId: string) {
-  if (themeId === "oc-2") return
+  if (themeId === "crewup") return
   for (const mode of ["light", "dark"] as const) {
     const isDark = mode === "dark"
     const variant = isDark ? theme.dark : theme.light
@@ -163,12 +164,12 @@ function cacheThemeVariants(theme: DesktopTheme, themeId: string) {
 export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
   name: "Theme",
   init: (props: { defaultTheme?: string; onThemeApplied?: (theme: DesktopTheme, mode: "light" | "dark") => void }) => {
-    const themeId = normalize(read(STORAGE_KEYS.THEME_ID) ?? props.defaultTheme) ?? "oc-2"
+    const themeId = normalize(read(STORAGE_KEYS.THEME_ID) ?? props.defaultTheme) ?? "crewup"
     const colorScheme = (read(STORAGE_KEYS.COLOR_SCHEME) as ColorScheme | null) ?? "system"
     const mode = colorScheme === "system" ? getSystemMode() : colorScheme
     const [store, setStore] = createStore({
       themes: {
-        "oc-2": oc2Theme,
+        "crewup": crewupTheme,
       } as Record<string, DesktopTheme>,
       themeId,
       colorScheme,
@@ -221,9 +222,9 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       if (e.key === STORAGE_KEYS.THEME_ID && e.newValue) {
         const next = normalize(e.newValue)
         if (!next) return
-        if (next !== "oc-2" && !knownThemes().has(next) && !store.themes[next]) return
+        if (next !== "crewup" && !knownThemes().has(next) && !store.themes[next]) return
         setStore("themeId", next)
-        if (next === "oc-2") {
+        if (next === "crewup") {
           clear()
           return
         }
@@ -249,7 +250,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       makeEventListener(mediaQuery, "change", onMedia)
 
       const rawTheme = read(STORAGE_KEYS.THEME_ID)
-      const savedTheme = normalize(rawTheme ?? props.defaultTheme) ?? "oc-2"
+      const savedTheme = normalize(rawTheme ?? props.defaultTheme) ?? "crewup"
       const savedScheme = (read(STORAGE_KEYS.COLOR_SCHEME) as ColorScheme | null) ?? "system"
       if (rawTheme && rawTheme !== savedTheme) {
         write(STORAGE_KEYS.THEME_ID, savedTheme)
@@ -276,12 +277,12 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
         console.warn(`Theme "${id}" not found`)
         return
       }
-      if (next !== "oc-2" && !knownThemes().has(next) && !store.themes[next]) {
+      if (next !== "crewup" && !knownThemes().has(next) && !store.themes[next]) {
         console.warn(`Theme "${id}" not found`)
         return
       }
       setStore("themeId", next)
-      if (next === "oc-2") {
+      if (next === "crewup") {
         write(STORAGE_KEYS.THEME_ID, next)
         clear()
         return
@@ -313,7 +314,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       previewTheme: (id: string) => {
         const next = normalize(id)
         if (!next) return
-        if (next !== "oc-2" && !knownThemes().has(next) && !store.themes[next]) return
+        if (next !== "crewup" && !knownThemes().has(next) && !store.themes[next]) return
         setStore("previewThemeId", next)
         void load(next).then((theme) => {
           if (!theme || store.previewThemeId !== next) return

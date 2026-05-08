@@ -232,7 +232,7 @@ export function Titlebar() {
                     "opacity-0 duration-120 ease-in delay-0 pointer-events-none": layout.sidebar.opened(),
                   }}
                 >
-                  <TooltipKeybind
+                   <TooltipKeybind
                     placement="bottom"
                     title={language.t("command.session.new")}
                     keybind={command.keybind("session.new")}
@@ -252,6 +252,27 @@ export function Titlebar() {
                       aria-current={creating() ? "page" : undefined}
                     />
                   </TooltipKeybind>
+                  <Tooltip placement="bottom" value="Azure DevOps Board" openDelay={2000}>
+                    <Button
+                      variant="ghost"
+                      class="titlebar-icon w-8 h-6 p-0 box-border"
+                      disabled={layout.sidebar.opened()}
+                      tabIndex={layout.sidebar.opened() ? -1 : undefined}
+                      onClick={() => {
+                        if (!params.dir) return
+                        navigate(`/${params.dir}/board`)
+                      }}
+                      aria-label="Azure DevOps Board"
+                      aria-current={location.pathname.endsWith("/board") ? "page" : undefined}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" class="text-icon-base">
+                        <rect x="1" y="1" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.2" fill="none" />
+                        <rect x="3" y="4" width="3" height="8" rx="0.5" fill="currentColor" opacity="0.6" />
+                        <rect x="7" y="6" width="3" height="6" rx="0.5" fill="currentColor" opacity="0.4" />
+                        <rect x="11" y="3" width="2" height="9" rx="0.5" fill="currentColor" opacity="0.8" />
+                      </svg>
+                    </Button>
+                  </Tooltip>
                 </div>
               </div>
             </Show>

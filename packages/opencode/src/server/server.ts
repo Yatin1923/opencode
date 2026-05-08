@@ -13,6 +13,9 @@ import { InstanceRoutes } from "./routes/instance"
 import { ControlPlaneRoutes } from "./routes/control"
 import { UIRoutes } from "./routes/ui"
 import { GlobalRoutes } from "./routes/global"
+import { TeamRoutes } from "./routes/team"
+import { AdoRoutes } from "./routes/ado"
+import { PipelineRoutes } from "./routes/pipeline"
 import { WorkspaceRouterMiddleware } from "./workspace"
 import { InstanceMiddleware } from "./routes/instance/middleware"
 import { WorkspaceRoutes } from "./routes/control/workspace"
@@ -68,6 +71,9 @@ function createHono(opts: { cors?: string[] }) {
     .use(CompressionMiddleware)
     .use(CorsMiddleware(opts))
     .route("/global", GlobalRoutes())
+     .route("/api/team", TeamRoutes())
+     .route("/api/ado", AdoRoutes())
+     .route("/api/pipeline", PipelineRoutes())
 
   const runtime = adapter.create(app)
 

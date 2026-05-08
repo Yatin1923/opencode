@@ -71,20 +71,22 @@ export default function Home() {
   return (
     <div class="mx-auto mt-55 w-full md:w-auto px-4">
       <Logo class="md:w-xl opacity-12" />
-      <Button
-        size="large"
-        variant="ghost"
-        class="mt-4 mx-auto text-14-regular text-text-weak"
-        onClick={() => dialog.show(() => <DialogSelectServer />)}
-      >
-        <div
-          classList={{
-            "size-2 rounded-full": true,
-            [serverDotClass()]: true,
-          }}
-        />
-        {server.name}
-      </Button>
+      <div class="flex items-center gap-3 mt-4 mx-auto">
+        <Button
+          size="large"
+          variant="ghost"
+          class="text-14-regular text-text-weak"
+          onClick={() => dialog.show(() => <DialogSelectServer />)}
+        >
+          <div
+            classList={{
+              "size-2 rounded-full": true,
+              [serverDotClass()]: true,
+            }}
+          />
+          {server.name}
+        </Button>
+      </div>
       <Switch>
         <Match when={sync.data.project.length > 0}>
           <div class="mt-20 w-full flex flex-col gap-4">
