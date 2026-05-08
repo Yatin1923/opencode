@@ -347,7 +347,6 @@ export function Titlebar() {
             <div data-tauri-decorum-tb class="flex flex-row" />
           </Show>
         </div>
-      </div>
     </header>
   )
 }
