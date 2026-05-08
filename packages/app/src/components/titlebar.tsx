@@ -35,6 +35,9 @@ type TauriApi = {
 const tauriApi = () => (window as unknown as { __TAURI__?: TauriApi }).__TAURI__
 const currentDesktopWindow = () => tauriApi()?.window?.getCurrentWindow?.()
 const currentThemeWindow = () => tauriApi()?.webviewWindow?.getCurrentWebviewWindow?.()
+const titlebarHeight = 40
+const minTitlebarZoom = 0.25
+const windowsControlsBaseWidth = 138 // 3 native Windows caption buttons at 46px each.
 
 export function Titlebar() {
   const layout = useLayout()
@@ -51,7 +54,14 @@ export function Titlebar() {
   const windows = createMemo(() => platform.platform === "desktop" && platform.os === "windows")
   const web = createMemo(() => platform.platform === "web")
   const zoom = () => platform.webviewZoom?.() ?? 1
-  const minHeight = () => (mac() ? `${40 / zoom()}px` : undefined)
+  const titlebarZoom = () => (windows() ? Math.max(zoom(), minTitlebarZoom) : zoom())
+  const counterZoom = () => (windows() && titlebarZoom() < 1 ? 1 / titlebarZoom() : 1)
+  const minHeight = () => {
+    if (mac()) return `${titlebarHeight / zoom()}px`
+    if (windows()) return `${titlebarHeight / Math.min(titlebarZoom(), 1)}px`
+    return undefined
+  }
+  const windowsControlsWidth = () => `${windowsControlsBaseWidth / Math.max(titlebarZoom(), 1)}px`
 
   const [history, setHistory] = createStore({
     stack: [] as string[],
@@ -165,7 +175,7 @@ export function Titlebar() {
 
   return (
     <header
-      class="h-10 shrink-0 bg-background-base relative grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center"
+      class="h-10 shrink-0 bg-background-base relative overflow-hidden"
       style={{ "min-height": minHeight() }}
       data-tauri-drag-region
       onMouseDown={drag}
@@ -319,23 +329,24 @@ export function Titlebar() {
         </div>
       </div>
 
-      <div class="min-w-0 flex items-center justify-center pointer-events-none">
-        <div id="opencode-titlebar-center" class="pointer-events-auto min-w-0 flex justify-center w-fit max-w-full" />
-      </div>
+        <div class="min-w-0 flex items-center justify-center pointer-events-none">
+          <div id="opencode-titlebar-center" class="pointer-events-auto min-w-0 flex justify-center w-fit max-w-full" />
+        </div>
 
-      <div
-        classList={{
-          "flex items-center min-w-0 justify-end": true,
-          "pr-2": !windows(),
-        }}
-        data-tauri-drag-region
-        onMouseDown={drag}
-      >
-        <div id="opencode-titlebar-right" class="flex items-center gap-1 shrink-0 justify-end" />
-        <Show when={windows()}>
-          {!tauriApi() && <div class="w-36 shrink-0" />}
-          <div data-tauri-decorum-tb class="flex flex-row" />
-        </Show>
+        <div
+          classList={{
+            "flex items-center min-w-0 justify-end": true,
+            "pr-2": !windows(),
+          }}
+          data-tauri-drag-region
+          onMouseDown={drag}
+        >
+          <div id="opencode-titlebar-right" class="flex items-center gap-1 shrink-0 justify-end" />
+          <Show when={windows()}>
+            {!tauriApi() && <div class="shrink-0" style={{ width: windowsControlsWidth() }} />}
+            <div data-tauri-decorum-tb class="flex flex-row" />
+          </Show>
+        </div>
       </div>
     </header>
   )
