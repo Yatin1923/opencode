@@ -47,7 +47,15 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket, opts?: CorsOptions): H
   const handler = ExperimentalHttpApiServer.webHandler(opts).handler
   const context = Context.empty() as Context.Context<unknown>
 
-  app.all("/api/*", (c) => handler(c.req.raw, context))
+  // Skip namespaces owned by legacy Hono routes mounted on the parent app
+  // (see server.ts: /api/team, /api/ado, /api/pipeline). Without this, the
+  // catch-all forwards them to the Effect HttpApi handler which doesn't know
+  // about them and the request falls through to UIRoutes (SPA index.html).
+  app.all("/api/*", (c, next) => {
+    const p = c.req.path
+    if (p.startsWith("/api/pipeline/") || p.startsWith("/api/team/") || p.startsWith("/api/ado/")) return next()
+    return handler(c.req.raw, context)
+  })
 
   if (Flag.OPENCODE_EXPERIMENTAL_HTTPAPI) {
     app.get(EventPaths.event, (c) => handler(c.req.raw, context))

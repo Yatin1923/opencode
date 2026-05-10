@@ -1,24 +1,4 @@
-import { execFile } from "node:child_process"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-import { promisify } from "node:util"
-
 import type { Configuration } from "electron-builder"
-
-const execFileAsync = promisify(execFile)
-const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
-const signScript = path.join(rootDir, "script", "sign-windows.ps1")
-
-async function signWindows(configuration: { path: string }) {
-  if (process.platform !== "win32") return
-  if (process.env.GITHUB_ACTIONS !== "true") return
-
-  await execFileAsync(
-    "pwsh",
-    ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", signScript, configuration.path],
-    { cwd: rootDir },
-  )
-}
 
 const channel = (() => {
   const raw = process.env.OPENCODE_CHANNEL
@@ -26,8 +6,13 @@ const channel = (() => {
   return "dev"
 })()
 
+// GitHub owner/repo for publishing releases and auto-updates.
+// Change these to your own GitHub repository.
+const GH_OWNER = process.env.GH_PUBLISH_OWNER ?? "Yatin1923"
+const GH_REPO = process.env.GH_PUBLISH_REPO ?? "opencode"
+
 const getBase = (): Configuration => ({
-  artifactName: "opencode-desktop-${os}-${arch}.${ext}",
+  artifactName: "opencode-custom-desktop-${os}-${arch}.${ext}",
   directories: {
     output: "dist",
     buildResources: "resources",
@@ -40,39 +25,41 @@ const getBase = (): Configuration => ({
       filter: ["index.js", "index.d.ts", "build/Release/mac_window.node", "swift-build/**"],
     },
   ],
+  publish: {
+    provider: "github",
+    owner: GH_OWNER,
+    repo: GH_REPO,
+    channel: "latest",
+  },
   mac: {
     category: "public.app-category.developer-tools",
-    icon: `resources/icons/icon.icns`,
-    hardenedRuntime: true,
+    icon: "resources/icons/icon.icns",
+    hardenedRuntime: false,
     gatekeeperAssess: false,
-    entitlements: "resources/entitlements.plist",
-    entitlementsInherit: "resources/entitlements.plist",
-    notarize: true,
+    notarize: false,
+    identity: null,
     target: ["dmg", "zip"],
   },
   dmg: {
-    sign: true,
+    sign: false,
   },
   protocols: {
-    name: "Crewup",
-    schemes: ["crewup"],
+    name: "OpenCode Custom",
+    schemes: ["opencode-custom"],
   },
   win: {
-    icon: `resources/icons/icon.ico`,
-    signtoolOptions: {
-      sign: signWindows,
-    },
+    icon: "resources/icons/icon.ico",
     target: ["nsis"],
     verifyUpdateCodeSignature: false,
   },
   nsis: {
     oneClick: true,
     perMachine: false,
-    installerIcon: `resources/icons/icon.ico`,
-    installerHeaderIcon: `resources/icons/icon.ico`,
+    installerIcon: "resources/icons/icon.ico",
+    installerHeaderIcon: "resources/icons/icon.ico",
   },
   linux: {
-    icon: `resources/icons`,
+    icon: "resources/icons",
     category: "Development",
     target: ["AppImage", "deb", "rpm"],
   },
@@ -85,29 +72,25 @@ function getConfig() {
     case "dev": {
       return {
         ...base,
-        appId: "com.crewup.desktop.dev",
-        productName: "Crewup Dev",
-        rpm: { packageName: "crewup-dev" },
+        appId: "com.yatin1923.opencode-custom.dev",
+        productName: "OpenCode Custom Dev",
+        rpm: { packageName: "opencode-custom-dev" },
       }
     }
     case "beta": {
       return {
         ...base,
-        appId: "com.crewup.desktop.beta",
-        productName: "Crewup Beta",
-        protocols: { name: "Crewup Beta", schemes: ["crewup"] },
-        publish: { provider: "github", owner: "anomalyco", repo: "opencode-beta", channel: "latest" },
-        rpm: { packageName: "crewup-beta" },
+        appId: "com.yatin1923.opencode-custom.beta",
+        productName: "OpenCode Custom Beta",
+        rpm: { packageName: "opencode-custom-beta" },
       }
     }
     case "prod": {
       return {
         ...base,
-        appId: "com.crewup.desktop",
-        productName: "Crewup",
-        protocols: { name: "Crewup", schemes: ["crewup"] },
-        publish: { provider: "github", owner: "anomalyco", repo: "opencode", channel: "latest" },
-        rpm: { packageName: "crewup" },
+        appId: "com.yatin1923.opencode-custom",
+        productName: "OpenCode Custom",
+        rpm: { packageName: "opencode-custom" },
       }
     }
   }

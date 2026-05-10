@@ -1835,6 +1835,20 @@ export default function Page() {
             display: none !important;
           }
           body[data-embedded="1"] { padding: 0 !important; margin: 0 !important; }
+          /* Add breathing room above the first message in the embedded slide-in panel. */
+          body[data-embedded="1"] [data-slot="session-turn-list"] {
+            padding-top: 1.25rem !important;
+          }
+          /* Remove the extra empty bar below the prompt input that comes from the dock's
+             padding/background extending past the input in non-default heights. */
+          body[data-embedded="1"] [data-component="session-prompt-dock"] {
+            padding-bottom: 0.75rem !important;
+            background: transparent !important;
+          }
+          /* Hide the agent/model selector tray below the composer in the slide-in. */
+          body[data-embedded="1"] [data-dock-surface="tray"][data-dock-attach="top"] {
+            display: none !important;
+          }
         `}</style>
       </Show>
       {sessionSync() ?? ""}

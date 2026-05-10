@@ -1,14 +1,17 @@
-import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
 import { useNavigate, useParams } from "@solidjs/router"
 import { useSync } from "@/context/sync"
+import { useSDK } from "@/context/sdk"
 import { useServer } from "@/context/server"
+import { Identifier } from "@/utils/id"
 import { useNotification } from "@/context/notification"
 import { usePermission } from "@/context/permission"
 import { sessionPermissionRequest, sessionQuestionRequest } from "@/pages/session/composer/session-request-tree"
 import { persisted } from "@/utils/persist"
 import { Button } from "@opencode-ai/ui/button"
-import { PipelineRow, TeamIcon, statusColor as pipelineStatusColor, type PipelineInstance, type Team } from "@/components/pipeline-row"
+import { TeamIcon, statusColor as pipelineStatusColor, type PipelineInstance, type Team } from "@/components/pipeline-row"
+import { OrchestratorFlow } from "@/components/orchestrator-flow"
 
 type SortMode = "attention" | "recent"
 
@@ -59,6 +62,7 @@ function formatRelative(ts?: number) {
 // attention-first sort with persisted "recent only" toggle, archived filter.
 export default function DashboardPage() {
   const sync = useSync()
+  const sdk = useSDK()
   const server = useServer()
   const navigate = useNavigate()
   const params = useParams()
@@ -74,6 +78,7 @@ export default function DashboardPage() {
   const [pipelineStore, setPipelineStore] = createStore<{ list: PipelineInstance[]; teams: Team[] }>({ list: [], teams: [] })
   const [prompt, setPrompt] = createSignal("")
   const [submitting, setSubmitting] = createSignal(false)
+  const [startError, setStartError] = createSignal<string | null>(null)
 
   const authHeaders = (): Record<string, string> => {
     const headers: Record<string, string> = { "Content-Type": "application/json" }
@@ -117,25 +122,30 @@ export default function DashboardPage() {
 
   async function startOrchestrator() {
     const v = prompt().trim()
-    if (!v || submitting()) return
-    const b = base()
+    setStartError(null)
+    if (!v) { setStartError("Type a prompt first."); return }
+    if (submitting()) return
     const dir = sync.data.path.directory
-    if (!b || !dir) return
+    if (!dir) { setStartError("Working directory not loaded yet — wait a moment and retry."); return }
     setSubmitting(true)
     try {
-      await fetch(`${b}/api/pipeline/start`, {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({
-          directory: dir,
-          storyTitle: v,
-          workflowId: "orchestrator",
-          mode: "full",
-          story: { title: v },
-        }),
+      const created = await sdk.client.session
+        .create({ agent: "orchestrator" })
+        .then((x) => x.data ?? undefined)
+      if (!created) {
+        setStartError("Failed to create session.")
+        return
+      }
+      await sdk.client.session.promptAsync({
+        sessionID: created.id,
+        agent: "orchestrator",
+        messageID: Identifier.ascending("message"),
+        parts: [{ type: "text", text: v }],
       })
       setPrompt("")
       fetchPipelines()
+    } catch (err) {
+      setStartError(`Failed to start: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setSubmitting(false)
     }
@@ -154,9 +164,109 @@ export default function DashboardPage() {
   }
 
   const [stagePanel, setStagePanel] = createSignal<{ pipeline: PipelineInstance; stageIdx: number } | null>(null)
+  const [sessionPanel, setSessionPanel] = createSignal<string | null>(null)
+
+  // ---------- Viewed / attention tracking ----------
+  // idledAt: when each session last transitioned from busy/retry → idle.
+  // Only sessions that have actually been busy then went idle get an entry.
+  const [idledAt, setIdledAt] = createSignal(new Map<string, number>())
+
+  // flowViewedAt: when the user last opened ANY agent in a given flow,
+  // keyed by the flow's root session ID. Opening any agent in a flow
+  // dismisses the "completed" highlight for the entire flow.
+  const [flowViewedAt, setFlowViewedAt] = createSignal(new Map<string, number>())
+
+  // Walk up parentID chain to find the root session ID for a given session.
+  function findRootID(sessionID: string): string {
+    const sessions = sync.data.session ?? []
+    const byID = new Map(sessions.map((s) => [s.id, s]))
+    let cur = sessionID
+    while (true) {
+      const s = byID.get(cur)
+      if (!s?.parentID) return cur
+      cur = s.parentID
+    }
+  }
+
+  function openSession(sessionID: string) {
+    setSessionPanel(sessionID)
+    const rootID = findRootID(sessionID)
+    setFlowViewedAt((prev) => {
+      const next = new Map(prev)
+      next.set(rootID, Date.now())
+      return next
+    })
+  }
+
+  // Track busy→idle transitions: record the timestamp when each session goes idle.
+  const prevStatuses = new Map<string, string>()
+  createEffect(
+    on(
+      () => sync.data.session_status,
+      (statuses) => {
+        const newIdled: [string, number][] = []
+        for (const [id, st] of Object.entries(statuses)) {
+          const cur = st?.type ?? "idle"
+          const prev = prevStatuses.get(id) ?? "idle"
+          if ((prev === "busy" || prev === "retry") && cur === "idle") {
+            newIdled.push([id, Date.now()])
+          }
+          prevStatuses.set(id, cur)
+        }
+        if (newIdled.length > 0) {
+          setIdledAt((prev) => {
+            const next = new Map(prev)
+            for (const [id, ts] of newIdled) next.set(id, ts)
+            return next
+          })
+        }
+      },
+    ),
+  )
+  // ---------- /Viewed / attention tracking ----------
 
   function openStage(pipeline: PipelineInstance, stageIdx: number) {
     setStagePanel({ pipeline, stageIdx })
+  }
+
+  // Collect rootID + every descendant session id (depth-first) for the given orchestrator root.
+  function collectFlowIds(rootID: string): string[] {
+    const sessions = sync.data.session ?? []
+    const byParent = new Map<string, string[]>()
+    for (const s of sessions) {
+      if (!s.parentID) continue
+      const arr = byParent.get(s.parentID)
+      if (arr) arr.push(s.id)
+      else byParent.set(s.parentID, [s.id])
+    }
+    const out: string[] = []
+    const stack = [rootID]
+    const seen = new Set<string>()
+    while (stack.length) {
+      const id = stack.pop()!
+      if (seen.has(id)) continue
+      seen.add(id)
+      out.push(id)
+      const kids = byParent.get(id)
+      if (kids) stack.push(...kids)
+    }
+    return out
+  }
+
+  // Stop the entire orchestrator flow: aborts root + all descendant sessions in parallel.
+  async function stopFlow(rootID: string) {
+    const ids = collectFlowIds(rootID)
+    await Promise.all(ids.map((id) => sdk.client.session.abort({ sessionID: id }).catch(() => {})))
+  }
+
+  // Delete the entire orchestrator flow: aborts everything first, then deletes the root
+  // (server cascades the delete to all descendants — see Session.remove in session.ts).
+  async function deleteFlow(rootID: string) {
+    if (sessionPanel() && collectFlowIds(rootID).includes(sessionPanel()!)) {
+      setSessionPanel(null)
+    }
+    await stopFlow(rootID)
+    await sdk.client.session.delete({ sessionID: rootID }).catch(() => {})
   }
 
   // Re-resolve the panel's pipeline against the live store so streaming updates
@@ -168,14 +278,41 @@ export default function DashboardPage() {
     return { pipeline: live, stageIdx: Math.min(sel.stageIdx, live.stages.length - 1) }
   })
 
-  const activePipelines = () => pipelineStore.list.filter((p) => p.status === "running" || p.status === "paused")
-  const recentPipelines = () => pipelineStore.list
-    .filter((p) => p.status === "completed" || p.status === "stopped")
-    .slice(0, 3)
   // ---------- /Orchestrator pipelines ----------
 
+  const orchestratorRoots = createMemo(() =>
+    (sync.data.session ?? [])
+      .filter((s) => !s.parentID && s.agent === "orchestrator" && (prefs.showArchived || !s.time?.archived))
+      .sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0)),
+  )
+
+  // Set of session IDs that belong to any orchestrator flow (root + all descendants),
+  // so we can exclude them from the flat session grid below.
+  const orchestratorFlowIds = createMemo(() => {
+    const sessions = sync.data.session ?? []
+    const byParent = new Map<string, string[]>()
+    for (const s of sessions) {
+      if (!s.parentID) continue
+      const arr = byParent.get(s.parentID)
+      if (arr) arr.push(s.id)
+      else byParent.set(s.parentID, [s.id])
+    }
+    const out = new Set<string>()
+    const stack = orchestratorRoots().map((s) => s.id)
+    while (stack.length) {
+      const id = stack.pop()!
+      if (out.has(id)) continue
+      out.add(id)
+      const kids = byParent.get(id)
+      if (kids) stack.push(...kids)
+    }
+    return out
+  })
+
   const allSessions = createMemo(() =>
-    (sync.data.session ?? []).filter((s) => !s.parentID && (prefs.showArchived || !s.time?.archived)),
+    (sync.data.session ?? []).filter(
+      (s) => !s.parentID && !orchestratorFlowIds().has(s.id) && (prefs.showArchived || !s.time?.archived),
+    ),
   )
 
   const directory = () => sync.data.path.directory
@@ -218,13 +355,24 @@ export default function DashboardPage() {
     return list.sort((a, b) => rank({ attention: b.attentionScore, updated: b.updated }) - rank({ attention: a.attentionScore, updated: a.updated }))
   })
 
+  // Counts across ALL root sessions (orchestrator flows + flat sessions) for the KPI bar.
+  const allRootSessions = createMemo(() =>
+    (sync.data.session ?? []).filter((s) => !s.parentID && (prefs.showArchived || !s.time?.archived)),
+  )
+
   const counts = createMemo(() => {
-    const items = ranked()
-    return {
-      active: items.filter((i) => i.status === "busy" || i.status === "retry").length,
-      waiting: items.filter((i) => i.attentionScore > 0).length,
-      errors: items.filter((i) => i.attention.error).length,
+    const sessions = allRootSessions()
+    let active = 0
+    let waiting = 0
+    let errors = 0
+    for (const s of sessions) {
+      const st = sync.data.session_status[s.id]?.type ?? "idle"
+      if (st === "busy" || st === "retry") active++
+      const att = attentionFor(s.id)
+      if (att.permission || att.question || att.retry || att.error) waiting++
+      if (att.error) errors++
     }
+    return { active, waiting, errors, total: sessions.length }
   })
 
   return (
@@ -234,38 +382,8 @@ export default function DashboardPage() {
           <div class="flex flex-col gap-1">
             <h1 class="text-18-medium text-text-strong">Mission Control</h1>
             <span class="text-12-regular text-text-weak">
-              {ranked().length} session{ranked().length === 1 ? "" : "s"}
+              {counts().total} session{counts().total === 1 ? "" : "s"}
             </span>
-          </div>
-          <div class="flex items-center gap-2">
-            <div class="flex rounded-md border border-border-base overflow-hidden">
-              <For each={[
-                { id: "attention" as const, label: "Attention" },
-                { id: "recent" as const, label: "Recent" },
-              ]}>
-                {(opt) => (
-                  <button
-                    type="button"
-                    class="px-3 py-1.5 text-12-medium transition-colors"
-                    classList={{
-                      "bg-background-strong text-text-strong": prefs.sortBy === opt.id,
-                      "text-text-weak hover:text-text-base": prefs.sortBy !== opt.id,
-                    }}
-                    onClick={() => setPrefs("sortBy", opt.id)}
-                  >
-                    {opt.label}
-                  </button>
-                )}
-              </For>
-            </div>
-            <label class="flex items-center gap-2 text-12-regular text-text-weak cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={prefs.showArchived}
-                onChange={(e) => setPrefs("showArchived", e.currentTarget.checked)}
-              />
-              Archived
-            </label>
           </div>
         </header>
 
@@ -302,38 +420,36 @@ export default function DashboardPage() {
               {submitting() ? "Starting…" : "Start with Orchestrator"}
             </Button>
           </div>
+          <Show when={startError()}>
+            <div class="text-11-regular text-status-error border border-status-error/40 rounded px-3 py-2 bg-status-error/5">
+              {startError()}
+            </div>
+          </Show>
         </div>
 
-        {/* Live orchestrator pipelines */}
-        <Show when={activePipelines().length > 0 || recentPipelines().length > 0}>
+        {/* Orchestrator flow trees */}
+        <Show when={orchestratorRoots().length > 0}>
           <div class="flex flex-col gap-3">
             <div class="flex items-center justify-between">
-              <span class="text-12-medium text-text-weak uppercase tracking-wider">
-                Pipelines {activePipelines().length > 0 ? `(${activePipelines().length} active)` : ""}
+              <h2 class="text-14-medium text-text-strong">Orchestrator Flows</h2>
+              <span class="text-11-regular text-text-weak">
+                {orchestratorRoots().length} flow{orchestratorRoots().length === 1 ? "" : "s"}
               </span>
             </div>
-            <For each={activePipelines()}>
-              {(pipeline) => (
-                <PipelineRow
-                  pipeline={pipeline}
-                  teams={pipelineStore.teams}
-                  onStageClick={openStage}
-                  onStop={stopPipeline}
-                />
-              )}
-            </For>
-            <Show when={activePipelines().length === 0 && recentPipelines().length > 0}>
-              <For each={recentPipelines()}>
-                {(pipeline) => (
-                  <PipelineRow
-                    pipeline={pipeline}
-                    teams={pipelineStore.teams}
-                    onStageClick={openStage}
-                    onStop={stopPipeline}
+            <div class="flex flex-col gap-3">
+              <For each={orchestratorRoots()}>
+                {(root) => (
+                  <OrchestratorFlow
+                    root={root}
+                    onOpen={openSession}
+                    onStop={stopFlow}
+                    onDelete={deleteFlow}
+                    idledAt={idledAt()}
+                    flowViewedAt={flowViewedAt()}
                   />
                 )}
               </For>
-            </Show>
+            </div>
           </div>
         </Show>
 
@@ -341,12 +457,14 @@ export default function DashboardPage() {
         <Show
           when={ranked().length > 0}
           fallback={
-            <div class="flex flex-col items-center justify-center py-20 gap-3">
-              <h2 class="text-16-medium text-text-strong">No sessions yet</h2>
-              <span class="text-12-regular text-text-weak">
-                Start a session from the sidebar to see it here.
-              </span>
-            </div>
+            <Show when={orchestratorRoots().length === 0}>
+              <div class="flex flex-col items-center justify-center py-20 gap-3">
+                <h2 class="text-16-medium text-text-strong">No sessions yet</h2>
+                <span class="text-12-regular text-text-weak">
+                  Start a session from the sidebar to see it here.
+                </span>
+              </div>
+            </Show>
           }
         >
           <div class="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-3">
@@ -355,7 +473,7 @@ export default function DashboardPage() {
                 <button
                   type="button"
                   class="text-left rounded-lg border border-border-base bg-background-strong p-4 flex flex-col gap-3 hover:border-border-strong transition-colors"
-                  onClick={() => navigate(`/${params.dir}/session/${item.session.id}`)}
+                  onClick={() => openSession(item.session.id)}
                 >
                   <div class="flex items-start justify-between gap-2">
                     <span class="text-14-medium text-text-strong line-clamp-2">
@@ -421,6 +539,20 @@ export default function DashboardPage() {
       </Show>
       <Show when={livePanel()}>
         <div class="fixed inset-0 z-30 bg-black/20" onClick={() => setStagePanel(null)} />
+      </Show>
+
+      {/* Slide-in session panel (clicking any dashboard session card) */}
+      <Show when={sessionPanel()}>
+        {(id) => (
+          <SessionSlidePanel
+            sessionID={id()}
+            encodedDir={params.dir || ""}
+            onClose={() => setSessionPanel(null)}
+          />
+        )}
+      </Show>
+      <Show when={sessionPanel()}>
+        <div class="fixed inset-0 z-30 bg-black/20" onClick={() => setSessionPanel(null)} />
       </Show>
 
       <style>{`
@@ -524,6 +656,61 @@ function KpiTile(props: { label: string; value: number | string; accent?: boolea
       >
         {props.value}
       </span>
+    </div>
+  )
+}
+
+function SessionSlidePanel(props: { sessionID: string; encodedDir: string; onClose: () => void }) {
+  const sync = useSync()
+  const session = () => (sync.data.session ?? []).find((s) => s.id === props.sessionID)
+  const status = () => sync.data.session_status[props.sessionID]?.type ?? "idle"
+  const url = () => `/${props.encodedDir}/session/${props.sessionID}?embedded=1`
+
+  function handleKeyDown(e: KeyboardEvent) {
+    if (e.key === "Escape") props.onClose()
+  }
+  onMount(() => window.addEventListener("keydown", handleKeyDown))
+  onCleanup(() => window.removeEventListener("keydown", handleKeyDown))
+
+  return (
+    <div class="fixed top-0 right-0 h-full w-[640px] z-40 bg-background-strong border-l border-border-base shadow-2xl flex flex-col dash-slide-in">
+      <div class="shrink-0 px-5 py-4 border-b border-border-base flex items-center justify-between gap-3">
+        <div class="flex items-center gap-3 min-w-0">
+          <span
+            class="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-11-medium shrink-0"
+            style={{ background: `${statusColor(status(), false)}20`, color: statusColor(status(), false) }}
+          >
+            <span class="size-1.5 rounded-full" style={{ background: statusColor(status(), false) }} />
+            {statusLabel(status())}
+          </span>
+          <div class="flex flex-col min-w-0">
+            <span class="text-13-medium text-text-strong truncate">
+              {session()?.title || "Session"}
+            </span>
+            <Show when={session()?.agent}>
+              <span class="text-11-regular text-text-weak truncate">@{session()?.agent}</span>
+            </Show>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={props.onClose}
+          class="text-text-weak hover:text-text-strong transition-colors shrink-0"
+          aria-label="Close"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M12 4L4 12M4 4l8 8" />
+          </svg>
+        </button>
+      </div>
+      <div class="flex-1 min-h-0 bg-background-base">
+        <iframe
+          src={url()}
+          class="w-full h-full border-0 block"
+          title={session()?.title || "Session"}
+          sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads"
+        />
+      </div>
     </div>
   )
 }
